@@ -1,6 +1,6 @@
 from telegram import Update
 from telegram.ext import ContextTypes
-from utils.supabseClient import supabase
+from utils.supabaseClient import supabase
 
 async def group_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:

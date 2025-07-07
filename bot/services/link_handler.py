@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from datetime import datetime, timezone
-from utils.supabseClient import supabase
+from utils.supabaseClient import supabase
 
 async def link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
