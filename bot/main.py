@@ -10,7 +10,13 @@ from services.task_handler import (
     working_task,
     completed_task,
     list_tasks,
-    task_history
+    task_history,
+    delete_task_by_id,
+    task_details
+)
+from services.project_handler import (
+    delete_project, 
+    create_project
 )
 
 load_dotenv()
@@ -46,6 +52,15 @@ app.add_handler(CommandHandler("working", working_task))
 app.add_handler(CommandHandler("completed", completed_task))
 app.add_handler(CommandHandler("tasks", list_tasks))
 app.add_handler(CommandHandler("history", task_history))
+app.add_handler(CommandHandler("delete_task", delete_task_by_id))
+app.add_handler(CommandHandler("task_details", task_details))
+
+
+
+#Register project handlers
+app.add_handler(CommandHandler("create_project", create_project))
+app.add_handler(CommandHandler("delete_project", delete_project))
+
 
 # Run bot
 if __name__ == "__main__":

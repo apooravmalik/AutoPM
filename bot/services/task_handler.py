@@ -6,88 +6,92 @@ from utils.auth_helper import get_user_from_telegram, check_admin_permission
 
 async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Create a standalone task (not part of a project)
-    Usage: /create_task Task Title -- Task Description -- YYYY-MM-DD
+    Create a task, optionally linked to a project.
+    Usage:
+    /create_task Task Title | Task Description | Project Name | YYYY-MM-DD
     """
     try:
-        # Check if user is admin
+        # Check if user is linked
         user_data = get_user_from_telegram(update.effective_user.id)
         if not user_data:
             await update.message.reply_text("❌ Please link your Telegram account first using /link")
             return
 
-        # Check admin permission for group
-        if update.message.chat.type in ["group", "supergroup"]:
-            group_id = update.message.chat.id
-            if not check_admin_permission(user_data["id"], group_id):
-                await update.message.reply_text("❌ Only admins can create tasks.")
-                return
-        else:
+        # Check if in a group
+        if update.message.chat.type not in ["group", "supergroup"]:
             await update.message.reply_text("❌ Tasks can only be created in groups.")
             return
 
-        # Parse command arguments
+        group_id = update.message.chat.id
+
+        # Check if user is admin in this group
+        if not check_admin_permission(user_data["id"], group_id):
+            await update.message.reply_text("❌ Only admins can create tasks.")
+            return
+
+        # Check for command arguments
         if not context.args:
             await update.message.reply_text(
-                "❗ Usage: `/create_task <title> -- <description> -- <deadline>`\n"
-                "Example: `/create_task Fix login bug -- The login form is not validating email properly -- 2024-12-31`\n"
-                "Note: Deadline is optional and should be in YYYY-MM-DD format",
+                "❗ Usage: `/create_task <title> | <description> | <project name> | <deadline>`\n"
+                "Example: `/create_task Fix login bug | Login form doesn't validate email | Incident Dashboard | 2024-12-31`\n"
+                "Note: Project and deadline are optional.",
                 parse_mode="Markdown"
             )
             return
 
-        # Join all arguments and split by --
+        # Parse command text
         full_text = " ".join(context.args)
-        parts = full_text.split("--")
-        
-        # Extract title (required)
-        title = parts[0].strip() if len(parts) > 0 else ""
-        
-        # Extract description (optional)
-        description = parts[1].strip() if len(parts) > 1 else None
-        
-        # Extract deadline (optional)
-        deadline = None
-        if len(parts) > 2:
-            deadline_str = parts[2].strip()
-            if deadline_str:
-                try:
-                    # Parse deadline string to validate format
-                    deadline_date = datetime.strptime(deadline_str, "%Y-%m-%d")
-                    deadline = deadline_str
-                    
-                    # Check if deadline is in the past
-                    if deadline_date.date() < datetime.now().date():
-                        await update.message.reply_text("❌ Deadline cannot be in the past.")
-                        return
-                        
-                except ValueError:
-                    await update.message.reply_text(
-                        "❌ Invalid deadline format. Please use YYYY-MM-DD format.\n"
-                        "Example: 2024-12-31"
-                    )
-                    return
+
+        # Split by pipe character
+        parts = [p.strip() for p in full_text.split("|")]
+
+        title = parts[0] if len(parts) > 0 else ""
+        description = parts[1] if len(parts) > 1 else None
+        project_name = parts[2] if len(parts) > 2 else None
+        deadline_str = parts[3] if len(parts) > 3 else None
 
         if not title:
             await update.message.reply_text("❌ Task title cannot be empty.")
             return
 
-        # Insert task into database
+        # Parse deadline if provided
+        deadline = None
+        if deadline_str:
+            try:
+                deadline_date = datetime.strptime(deadline_str, "%Y-%m-%d")
+                if deadline_date.date() < datetime.now().date():
+                    await update.message.reply_text("❌ Deadline cannot be in the past.")
+                    return
+                deadline = deadline_str
+            except ValueError:
+                await update.message.reply_text("❌ Invalid deadline format. Use YYYY-MM-DD (e.g., 2024-12-31).")
+                return
+
+        # Find project ID if project name is provided
+        project_id = None
+        if project_name:
+            project_res = supabase.from_("projects").select("id").eq("name", project_name).eq("group_id", group_id).execute()
+            if project_res.data and len(project_res.data) > 0:
+                project_id = project_res.data[0]["id"]
+            else:
+                await update.message.reply_text(f"⚠️ Project '{project_name}' not found in this group. Creating task as standalone.")
+
+        # Insert task
         task_data = {
             "title": title,
             "description": description,
             "status": "Pending",
             "group_id": group_id,
-            "project_id": None,  # Standalone task
-            "parent_task_id": None,  # Top-level task
+            "project_id": project_id,
+            "parent_task_id": None,
             "deadline": deadline
         }
 
         result = supabase.from_("tasks").insert(task_data).execute()
-        
+
         if result.data:
             task_id = result.data[0]["id"]
-            
+
             # Log task creation
             supabase.from_("status_logs").insert({
                 "task_id": task_id,
@@ -97,13 +101,15 @@ async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "deadline": deadline,
                 "notes": f"Task created: {title}"
             }).execute()
-            
+
             deadline_text = f"📅 **Deadline:** {deadline}" if deadline else "📅 **Deadline:** Not set"
-            
+            project_text = f"🏷️ **Project:** {project_name}" if project_name else "🏷️ **Project:** None"
+
             await update.message.reply_text(
                 f"✅ **Task Created!**\n"
                 f"📋 **Title:** {title}\n"
                 f"📝 **Description:** {description or 'None'}\n"
+                f"{project_text}\n"
                 f"{deadline_text}\n"
                 f"🆔 **ID:** `{task_id}`\n\n"
                 f"Use `/assign @username {title}` to assign it to someone.",
@@ -119,7 +125,7 @@ async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def assign_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Assign a task to a user
-    Usage: /assign @username task_name
+    Usage: /assign @username | task_name
     """
     try:
         # Check if user is admin
@@ -137,17 +143,39 @@ async def assign_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Tasks can only be assigned in groups.")
             return
 
-        if len(context.args) < 2:
+        if not context.args:
             await update.message.reply_text(
-                "❗ Usage: `/assign @username <task_name>`\n"
-                "Example: `/assign @john Fix login bug`",
+                "❗ Usage: `/assign @username | <task_name>`\n"
+                "Example: `/assign @john | Fix login bug`",
+                parse_mode="Markdown"
+            )
+            return
+
+        # Parse command text
+        full_text = " ".join(context.args)
+        
+        # Split by pipe character
+        parts = [p.strip() for p in full_text.split("|")]
+        
+        if len(parts) < 2:
+            await update.message.reply_text(
+                "❗ Usage: `/assign @username | <task_name>`\n"
+                "Example: `/assign @john | Fix login bug`",
                 parse_mode="Markdown"
             )
             return
 
         # Parse username and task name
-        username = context.args[0].replace("@", "")
-        task_name = " ".join(context.args[1:])
+        username = parts[0].replace("@", "")
+        task_name = parts[1]
+
+        if not username or not task_name:
+            await update.message.reply_text(
+                "❌ Both username and task name are required.\n"
+                "Usage: `/assign @username | <task_name>`",
+                parse_mode="Markdown"
+            )
+            return
 
         # Find the user by telegram username
         telegram_user = supabase.from_("telegram_users").select("id").eq("telegram_username", username).single().execute()
@@ -159,7 +187,15 @@ async def assign_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         assignee_id = telegram_user.data["id"]
 
         # Find the task by name in this group
-        task_result = supabase.from_("tasks").select("*").eq("group_id", group_id).ilike("title", f"%{task_name}%").execute()
+        task_result = (
+            supabase
+            .from_("tasks")
+            .select("*")
+            .eq("group_id", group_id)
+            .ilike("title", f"%{task_name}%")
+            .eq("status", "Pending")  # Only consider Pending tasks for assigning
+            .execute()
+        )
         
         if not task_result.data:
             await update.message.reply_text(f"❌ Task '{task_name}' not found in this group.")
@@ -308,16 +344,23 @@ async def completed_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         task_name = " ".join(context.args)
         group_id = update.message.chat.id if update.message.chat.type in ["group", "supergroup"] else None
 
-        # Find tasks assigned to this user
-        query = supabase.from_("tasks").select("*").eq("assigned_to", user_data["id"]).ilike("title", f"%{task_name}%")
-        
+        # Only fetch tasks assigned to this user AND currently in 'In Progess' status (assigned to someone and they accepted)
+        query = (
+            supabase
+            .from_("tasks")
+            .select("*")
+            .eq("assigned_to", user_data["id"])
+            .ilike("title", f"%{task_name}%")
+            .eq("status", "In Progress")
+        )
+
         if group_id:
             query = query.eq("group_id", group_id)
-        
+
         task_result = query.execute()
 
         if not task_result.data:
-            await update.message.reply_text(f"❌ No task '{task_name}' assigned to you.")
+            await update.message.reply_text(f"✅ The task '{task_name}' is already completed or not assigned.")
             return
 
         if len(task_result.data) > 1:
@@ -530,3 +573,110 @@ async def task_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error in task_history: {e}")
         await update.message.reply_text("❗ Something went wrong while fetching task history.")
+        
+        
+        
+async def delete_task_by_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        if not context.args:
+            await update.message.reply_text("❗ Usage: /delete_task <task_id>")
+            return
+
+        task_id = context.args[0]
+        user_data = get_user_from_telegram(update.effective_user.id)
+        if not user_data:
+            await update.message.reply_text("❌ Please link your Telegram account first using /link")
+            return
+
+        group_id = update.message.chat.id
+
+        # Fetch the task to confirm it exists
+        task_res = (
+            supabase
+            .from_("tasks")
+            .select("*")
+            .eq("id", task_id)
+            .eq("group_id", group_id)
+            .single()
+            .execute()
+        )
+
+        task = task_res.data
+        if not task:
+            await update.message.reply_text("❌ Task not found or doesn't belong to this group.")
+            return
+
+        # Delete all status_logs referencing this task
+        supabase.from_("status_logs").delete().eq("task_id", task_id).execute()
+
+        # Delete the task
+        supabase.from_("tasks").delete().eq("id", task_id).execute()
+
+        await update.message.reply_text(f"🗑️ Task *{task['title']}* (ID: `{task_id}`) deleted successfully.", parse_mode="Markdown")
+
+    except Exception as e:
+        print(f"Error in delete_task_by_id: {e}")
+        await update.message.reply_text("❗ Failed to delete the task. Please try again.")
+
+
+async def task_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        if not context.args:
+            await update.message.reply_text("❗ Usage: /get_task_details <task_name>")
+            return
+
+        task_name = " ".join(context.args)
+        group_id = update.message.chat.id
+
+        # Fetch matching tasks (case-insensitive) with Assigned or Pending status
+        task_result = (
+            supabase
+            .from_("tasks")
+            .select("*")
+            .eq("group_id", group_id)
+            .ilike("title", f"%{task_name}%")
+            .in_("status", ["Assigned", "Pending"])
+            .execute()
+        )
+
+        tasks = task_result.data
+
+        if not tasks:
+            await update.message.reply_text("❌ No matching tasks found with that name and status Assigned or Pending.")
+            return
+
+        # Send task details for each match
+        for task in tasks:
+            project_name = "Solo Task"
+            if task.get("project_id"):
+                project_fetch = (
+                    supabase
+                    .from_("projects")
+                    .select("name")
+                    .eq("id", task["project_id"])
+                    .single()
+                    .execute()
+                )
+                if project_fetch.data:
+                    project_name = project_fetch.data["name"]
+
+            assignee = task.get("assigned_to") or "Unassigned"
+            due_date = task.get("due_date") or "Not set"
+
+            await update.message.reply_text(
+                f"📝 *Task Details:*\n"
+                f"*ID:* `{task['id']}`\n"
+                f"*Title:* {task['title']}\n"
+                f"*Status:* {task['status']}\n"
+                f"*Due Date:* {due_date}\n"
+                f"*Assigned To:* {assignee}\n"
+                f"*Project:* {project_name}",
+                parse_mode="Markdown"
+            )
+
+    except Exception as e:
+        print(f"Error in get_task_details: {e}")
+        await update.message.reply_text("❗ Failed to fetch task details.")
+
+
+
