@@ -16,7 +16,11 @@ from services.task_handler import (
 )
 from services.project_handler import (
     delete_project, 
-    create_project
+    create_project,
+    project_details,
+    project_files,
+    handle_document_upload,
+    get_files
 )
 
 load_dotenv()
@@ -60,6 +64,10 @@ app.add_handler(CommandHandler("task_details", task_details))
 #Register project handlers
 app.add_handler(CommandHandler("create_project", create_project))
 app.add_handler(CommandHandler("delete_project", delete_project))
+app.add_handler(CommandHandler("project_details", project_details))
+app.add_handler(CommandHandler("project_files", project_files))
+app.add_handler(MessageHandler(filters.Document.ALL, handle_document_upload))
+app.add_handler(CommandHandler("get_files", get_files))
 
 
 # Run bot

@@ -6,12 +6,12 @@ import os
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-if not SUPABASE_URL or not SUPABASE_KEY:
+if not SUPABASE_URL or not SUPABASE_ROLE_KEY:
     raise Exception("❌ .env values not loaded properly!")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_ROLE_KEY)
 
 print("✅ Supabase URL:", SUPABASE_URL)
-print("✅ Supabase Key:", SUPABASE_KEY[:8] + "...")
+print("✅ Supabase Key:", SUPABASE_ROLE_KEY[:8] + "...")
