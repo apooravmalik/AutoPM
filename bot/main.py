@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from telegram import Update, ChatMemberUpdated
 from telegram.ext import Application, MessageHandler, CommandHandler, ChatMemberHandler, ContextTypes, filters
+import re
 from services.link_handler import link
 from services.group_handler import group_handler
 from services.task_handler import (
@@ -22,9 +23,13 @@ from services.project_handler import (
     handle_document_upload,
     get_files
 )
+from services.ai_handler import route_to_ai
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_USERNAME = os.getenv("BOT_USERNAME")
+
+print(f"✅ Bot script started. Listening for mentions of: @{BOT_USERNAME}")
 
 # Create bot application
 app = Application.builder().token(BOT_TOKEN).build()
@@ -43,6 +48,11 @@ async def handle_hello(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "`/link <Your OTC>` to connect your Telegram.",
             parse_mode="Markdown"
         )
+        
+# This handler will specifically catch any text message starting with your bot's @-mention.
+# We use re.IGNORECASE so "@autopm_bot" and "@AutoPM_bot" both work.
+ai_command_filter = filters.Regex(re.compile(r'^@' + re.escape(BOT_USERNAME), re.IGNORECASE))
+app.add_handler(MessageHandler(ai_command_filter, route_to_ai))
 
 # Register handlers
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_hello))
@@ -68,7 +78,6 @@ app.add_handler(CommandHandler("project_details", project_details))
 app.add_handler(CommandHandler("project_files", project_files))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document_upload))
 app.add_handler(CommandHandler("get_files", get_files))
-
 
 # Run bot
 if __name__ == "__main__":

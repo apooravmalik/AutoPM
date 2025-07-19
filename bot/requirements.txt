@@ -1,3 +1,7 @@
 python-telegram-bot
 supabase
 datetime
+langgraph
+langchain
+openai
+langchain_openai
