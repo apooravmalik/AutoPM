@@ -3,324 +3,115 @@ from telegram.ext import ContextTypes
 from datetime import datetime, timezone
 from utils.supabaseClient import supabase
 from utils.auth_helper import get_user_from_telegram, check_admin_permission
+from typing import Tuple
+from services.task_service import _create_task_service, _assign_task_service, _working_task_service
 
 async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Create a task, optionally linked to a project.
-    Usage:
-    /create_task Task Title | Task Description | Project Name | YYYY-MM-DD
+    Command handler for /create_task.
+    It now acts as a simple "adapter" that parses command arguments
+    and calls the shared service function.
     """
-    try:
-        # Check if user is linked
-        user_data = get_user_from_telegram(update.effective_user.id)
-        if not user_data:
-            await update.message.reply_text("❌ Please link your Telegram account first using /link")
-            return
+    # 1. Perform Telegram-specific checks
+    if update.message.chat.type not in ["group", "supergroup"]:
+        await update.message.reply_text("❌ This command can only be used in groups.")
+        return
 
-        # Check if in a group
-        if update.message.chat.type not in ["group", "supergroup"]:
-            await update.message.reply_text("❌ Tasks can only be created in groups.")
-            return
+    # 2. Parse arguments from the command context
+    if not context.args:
+        # Provide usage instructions if no arguments are given
+        await update.message.reply_text(
+            "❗ Usage: `/create_task <title> | <description> | <project name> | <deadline>`",
+            parse_mode="Markdown"
+        )
+        return
 
-        group_id = update.message.chat.id
+    full_text = " ".join(context.args)
+    parts = [p.strip() for p in full_text.split("|")]
+    
+    title = parts[0] if len(parts) > 0 else ""
+    if not title:
+        await update.message.reply_text("❌ Task title cannot be empty.")
+        return
 
-        # Check if user is admin in this group
-        if not check_admin_permission(user_data["id"], group_id):
-            await update.message.reply_text("❌ Only admins can create tasks.")
-            return
+    # 3. Call the shared service function with the parsed data
+    success, message = _create_task_service(
+        telegram_user_id=update.effective_user.id,
+        group_id=update.message.chat.id,
+        title=title,
+        description=parts[1] if len(parts) > 1 else None,
+        project_name=parts[2] if len(parts) > 2 else None,
+        deadline=parts[3] if len(parts) > 3 else None,
+    )
 
-        # Check for command arguments
-        if not context.args:
-            await update.message.reply_text(
-                "❗ Usage: `/create_task <title> | <description> | <project name> | <deadline>`\n"
-                "Example: `/create_task Fix login bug | Login form doesn't validate email | Incident Dashboard | 2024-12-31`\n"
-                "Note: Project and deadline are optional.",
-                parse_mode="Markdown"
-            )
-            return
-
-        # Parse command text
-        full_text = " ".join(context.args)
-
-        # Split by pipe character
-        parts = [p.strip() for p in full_text.split("|")]
-
-        title = parts[0] if len(parts) > 0 else ""
-        description = parts[1] if len(parts) > 1 else None
-        project_name = parts[2] if len(parts) > 2 else None
-        deadline_str = parts[3] if len(parts) > 3 else None
-
-        if not title:
-            await update.message.reply_text("❌ Task title cannot be empty.")
-            return
-
-        # Parse deadline if provided
-        deadline = None
-        if deadline_str:
-            try:
-                deadline_date = datetime.strptime(deadline_str, "%Y-%m-%d")
-                if deadline_date.date() < datetime.now().date():
-                    await update.message.reply_text("❌ Deadline cannot be in the past.")
-                    return
-                deadline = deadline_str
-            except ValueError:
-                await update.message.reply_text("❌ Invalid deadline format. Use YYYY-MM-DD (e.g., 2024-12-31).")
-                return
-
-        # Find project ID if project name is provided
-        project_id = None
-        if project_name:
-            project_res = supabase.from_("projects").select("id").eq("name", project_name).eq("group_id", group_id).execute()
-            if project_res.data and len(project_res.data) > 0:
-                project_id = project_res.data[0]["id"]
-            else:
-                await update.message.reply_text(f"⚠️ Project '{project_name}' not found in this group. Creating task as standalone.")
-
-        # Insert task
-        task_data = {
-            "title": title,
-            "description": description,
-            "status": "Pending",
-            "group_id": group_id,
-            "project_id": project_id,
-            "parent_task_id": None,
-            "deadline": deadline
-        }
-
-        result = supabase.from_("tasks").insert(task_data).execute()
-
-        if result.data:
-            task_id = result.data[0]["id"]
-
-            # Log task creation
-            supabase.from_("status_logs").insert({
-                "task_id": task_id,
-                "employee_id": user_data["id"],
-                "status": "created",
-                "group_id": group_id,
-                "deadline": deadline,
-                "notes": f"Task created: {title}"
-            }).execute()
-
-            deadline_text = f"📅 **Deadline:** {deadline}" if deadline else "📅 **Deadline:** Not set"
-            project_text = f"🏷️ **Project:** {project_name}" if project_name else "🏷️ **Project:** None"
-
-            await update.message.reply_text(
-                f"✅ **Task Created!**\n"
-                f"📋 **Title:** {title}\n"
-                f"📝 **Description:** {description or 'None'}\n"
-                f"{project_text}\n"
-                f"{deadline_text}\n"
-                f"🆔 **ID:** `{task_id}`\n\n"
-                f"Use `/assign @username {title}` to assign it to someone.",
-                parse_mode="Markdown"
-            )
-        else:
-            await update.message.reply_text("❌ Failed to create task. Please try again.")
-
-    except Exception as e:
-        print(f"Error in create_task: {e}")
-        await update.message.reply_text("❗ Something went wrong while creating the task.")
+    # 4. Reply to the user with the result from the service
+    await update.message.reply_text(message, parse_mode="Markdown")
 
 async def assign_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Assign a task to a user
-    Usage: /assign @username | task_name
+    Command handler for /assign.
+    It now acts as a simple "adapter" that parses command arguments
+    and calls the shared service function.
     """
-    try:
-        # Check if user is admin
-        user_data = get_user_from_telegram(update.effective_user.id)
-        if not user_data:
-            await update.message.reply_text("❌ Please link your Telegram account first using /link")
-            return
+    # 2. Perform Telegram-specific checks
+    if update.message.chat.type not in ["group", "supergroup"]:
+        await update.message.reply_text("❌ This command can only be used in groups.")
+        return
 
-        if update.message.chat.type in ["group", "supergroup"]:
-            group_id = update.message.chat.id
-            if not check_admin_permission(user_data["id"], group_id):
-                await update.message.reply_text("❌ Only admins can assign tasks.")
-                return
-        else:
-            await update.message.reply_text("❌ Tasks can only be assigned in groups.")
-            return
-
-        if not context.args:
-            await update.message.reply_text(
-                "❗ Usage: `/assign @username | <task_name>`\n"
-                "Example: `/assign @john | Fix login bug`",
-                parse_mode="Markdown"
-            )
-            return
-
-        # Parse command text
-        full_text = " ".join(context.args)
-        
-        # Split by pipe character
-        parts = [p.strip() for p in full_text.split("|")]
-        
-        if len(parts) < 2:
-            await update.message.reply_text(
-                "❗ Usage: `/assign @username | <task_name>`\n"
-                "Example: `/assign @john | Fix login bug`",
-                parse_mode="Markdown"
-            )
-            return
-
-        # Parse username and task name
-        username = parts[0].replace("@", "")
-        task_name = parts[1]
-
-        if not username or not task_name:
-            await update.message.reply_text(
-                "❌ Both username and task name are required.\n"
-                "Usage: `/assign @username | <task_name>`",
-                parse_mode="Markdown"
-            )
-            return
-
-        # Find the user by telegram username
-        telegram_user = supabase.from_("telegram_users").select("id").eq("telegram_username", username).single().execute()
-        
-        if not telegram_user.data:
-            await update.message.reply_text(f"❌ User @{username} not found or not linked.")
-            return
-
-        assignee_id = telegram_user.data["id"]
-
-        # Find the task by name in this group
-        task_result = (
-            supabase
-            .from_("tasks")
-            .select("*")
-            .eq("group_id", group_id)
-            .ilike("title", f"%{task_name}%")
-            .eq("status", "Pending")  # Only consider Pending tasks for assigning
-            .execute()
+    # 3. Parse arguments from the command context
+    if not context.args:
+        await update.message.reply_text(
+            "❗ Usage: `/assign @username | <task_name>`",
+            parse_mode="Markdown"
         )
-        
-        if not task_result.data:
-            await update.message.reply_text(f"❌ Task '{task_name}' not found in this group.")
-            return
+        return
 
-        if len(task_result.data) > 1:
-            task_list = "\n".join([f"• {task['title']}" for task in task_result.data[:5]])
-            await update.message.reply_text(
-                f"❌ Multiple tasks found matching '{task_name}':\n{task_list}\n\n"
-                "Please be more specific."
-            )
-            return
+    full_text = " ".join(context.args)
+    parts = [p.strip() for p in full_text.split("|")]
 
-        task = task_result.data[0]
-        
-        # Update task assignment
-        update_result = supabase.from_("tasks").update({
-            "assigned_to": assignee_id,
-            "status": "Assigned"
-        }).eq("id", task["id"]).execute()
+    if len(parts) < 2:
+        await update.message.reply_text("❗ Both a @username and task name are required.")
+        return
 
-        if update_result.data:
-            # Log task assignment
-            supabase.from_("status_logs").insert({
-                "task_id": task["id"],
-                "employee_id": assignee_id,
-                "status": "assigned",
-                "group_id": group_id,
-                "deadline": task["deadline"],
-                "notes": f"Task assigned to @{username} by admin"
-            }).execute()
+    assignee_username = parts[0]
+    task_name = parts[1]
+
+    if not assignee_username.startswith('@') or not task_name:
+        await update.message.reply_text("❗ Invalid format. Usage: `/assign @username | <task_name>`")
+        return
+
+    # 4. Call the shared service function with the parsed data
+    success, message = _assign_task_service(
+        admin_telegram_user_id=update.effective_user.id,
+        group_id=update.message.chat.id,
+        assignee_username=assignee_username,
+        task_name=task_name
+    )
+
+    # 5. Reply to the user with the result from the service
+    await update.message.reply_text(message, parse_mode="Markdown")
+    
             
-            deadline_text = f"📅 **Deadline:** {task['deadline']}" if task['deadline'] else "📅 **Deadline:** Not set"
-            
-            await update.message.reply_text(
-                f"✅ **Task Assigned!**\n"
-                f"📋 **Task:** {task['title']}\n"
-                f"👤 **Assigned to:** @{username}\n"
-                f"📊 **Status:** Assigned\n"
-                f"{deadline_text}",
-                parse_mode="Markdown"
-            )
-        else:
-            await update.message.reply_text("❌ Failed to assign task. Please try again.")
-
-    except Exception as e:
-        print(f"Error in assign_task: {e}")
-        await update.message.reply_text("❗ Something went wrong while assigning the task.")
-
 async def working_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Mark a task as working
-    Usage: /working task_name
+    Command handler for /working. Parses the task name and calls the service.
     """
-    try:
-        user_data = get_user_from_telegram(update.effective_user.id)
-        if not user_data:
-            await update.message.reply_text("❌ Please link your Telegram account first using /link")
-            return
+    if not context.args:
+        await update.message.reply_text("❗ Usage: `/working <task_name>`")
+        return
 
-        if not context.args:
-            await update.message.reply_text(
-                "❗ Usage: `/working <task_name>`\n"
-                "Example: `/working Fix login bug`",
-                parse_mode="Markdown"
-            )
-            return
+    task_name = " ".join(context.args)
+    group_id = update.message.chat.id if update.message.chat.type in ["group", "supergroup"] else None
 
-        task_name = " ".join(context.args)
-        group_id = update.message.chat.id if update.message.chat.type in ["group", "supergroup"] else None
-
-        # Find tasks assigned to this user
-        query = supabase.from_("tasks").select("*").eq("assigned_to", user_data["id"]).ilike("title", f"%{task_name}%")
-        
-        if group_id:
-            query = query.eq("group_id", group_id)
-        
-        task_result = query.execute()
-
-        if not task_result.data:
-            await update.message.reply_text(f"❌ No task '{task_name}' assigned to you.")
-            return
-
-        if len(task_result.data) > 1:
-            task_list = "\n".join([f"• {task['title']}" for task in task_result.data[:5]])
-            await update.message.reply_text(
-                f"❌ Multiple tasks found:\n{task_list}\n\n"
-                "Please be more specific."
-            )
-            return
-
-        task = task_result.data[0]
-
-        # Update task status
-        update_result = supabase.from_("tasks").update({
-            "status": "In Progress"
-        }).eq("id", task["id"]).execute()
-
-        # Log the status change
-        supabase.from_("status_logs").insert({
-            "task_id": task["id"],
-            "employee_id": user_data["id"],
-            "status": "working",
-            "group_id": group_id,
-            "deadline": task["deadline"],
-            "notes": f"Task started by user"
-        }).execute()
-
-        if update_result.data:
-            deadline_text = f"📅 **Deadline:** {task['deadline']}" if task['deadline'] else ""
-            
-            await update.message.reply_text(
-                f"🚀 **Task Started!**\n"
-                f"📋 **Task:** {task['title']}\n"
-                f"📊 **Status:** In Progress\n"
-                f"⏰ **Started:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-                f"{deadline_text}",
-                parse_mode="Markdown"
-            )
-        else:
-            await update.message.reply_text("❌ Failed to update task status.")
-
-    except Exception as e:
-        print(f"Error in working_task: {e}")
-        await update.message.reply_text("❗ Something went wrong while updating the task.")
+    # Call the shared service function
+    success, message = _working_task_service(
+        telegram_user_id=update.effective_user.id,
+        task_name=task_name,
+        group_id=group_id
+    )
+    
+    # Reply with the result from the service
+    await update.message.reply_text(message, parse_mode="Markdown")
 
 async def completed_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -677,6 +468,3 @@ async def task_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error in get_task_details: {e}")
         await update.message.reply_text("❗ Failed to fetch task details.")
-
-
-

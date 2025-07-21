@@ -2,7 +2,7 @@
 
 from telegram import Update
 from telegram.ext import ContextTypes
-from graph.agent import app # 👈 1. Import your compiled LangGraph app
+from graph.builder import app
 
 async def route_to_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """

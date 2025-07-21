@@ -3,9 +3,9 @@ from dotenv import load_dotenv
 from telegram import Update, ChatMemberUpdated
 from telegram.ext import Application, MessageHandler, CommandHandler, ChatMemberHandler, ContextTypes, filters
 import re
-from services.link_handler import link
-from services.group_handler import group_handler
-from services.task_handler import (
+from handlers.link_handler import link
+from handlers.group_handler import group_handler
+from handlers.task_handler import (
     create_task,
     assign_task,
     working_task,
@@ -15,7 +15,7 @@ from services.task_handler import (
     delete_task_by_id,
     task_details
 )
-from services.project_handler import (
+from handlers.project_handler import (
     delete_project, 
     create_project,
     project_details,
@@ -23,7 +23,7 @@ from services.project_handler import (
     handle_document_upload,
     get_files
 )
-from services.ai_handler import route_to_ai
+from handlers.ai_handler import route_to_ai
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
