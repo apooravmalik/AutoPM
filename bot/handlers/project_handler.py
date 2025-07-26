@@ -6,68 +6,42 @@ from utils.auth_helper import get_user_from_telegram, check_admin_permission
 import os
 from uuid import uuid4
 import tempfile
+from services.project_service import _create_project_service, _project_details_service, _project_files_service, _get_files_service
 
 async def create_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        if not context.args:
-            await update.message.reply_text("❗ Usage: /create_project <name> | <description> | <raw_input>")
-            return
+    """
+    Command handler for /create_project.
+    Parses arguments and calls the shared service function.
+    """
+    # 1. Telegram-specific checks
+    if update.message.chat.type not in ["group", "supergroup"]:
+        await update.message.reply_text("❗ This command must be used inside a group.")
+        return
 
-        full_text = " ".join(context.args)
-        parts = [p.strip() for p in full_text.split("|")]
+    # 2. Parse arguments
+    if not context.args:
+        await update.message.reply_text("❗ Usage: /create_project <name> | <description> | <raw_input>")
+        return
 
-        if len(parts) < 1:
-            await update.message.reply_text("❗ Project name is required.\n\nFormat:\n/create_project <name> | <description> | <raw_input>")
-            return
+    full_text = " ".join(context.args)
+    parts = [p.strip() for p in full_text.split("|")]
+    name = parts[0]
+    
+    if not name:
+        await update.message.reply_text("❗ Project name is required.")
+        return
 
-        name = parts[0]
-        description = parts[1] if len(parts) > 1 else None
-        raw_input = parts[2] if len(parts) > 2 else None
+    # 3. Call the shared service function
+    success, message = _create_project_service(
+        telegram_user_id=update.effective_user.id,
+        group_id=update.effective_chat.id,
+        name=name,
+        description=parts[1] if len(parts) > 1 else None,
+        raw_input=parts[2] if len(parts) > 2 else None
+    )
 
-        telegram_id = update.effective_user.id
-        group_id = update.effective_chat.id if update.effective_chat.type in ["group", "supergroup"] else None
-
-        user_res = get_user_from_telegram(telegram_id)
-        if not user_res:
-            await update.message.reply_text("❗ You are not linked yet. Use /link to link your Telegram account.")
-            return
-
-        owner_id = user_res["id"]
-
-        if not group_id:
-            await update.message.reply_text("❗ This command must be used inside a group.")
-            return
-
-        group_res = supabase.from_("groups").select("group_id").eq("group_id", group_id).single().execute()
-        if not group_res.data:
-            await update.message.reply_text("❗ Group is not registered. Use /link in this group first.")
-            return
-
-        if not check_admin_permission(owner_id, group_id):
-            await update.message.reply_text("❌ Only admins can create projects.")
-            return
-
-        existing = supabase.from_("projects").select("id").eq("group_id", group_id).eq("name", name).execute()
-        if existing.data and len(existing.data) > 0:
-            await update.message.reply_text(f"⚠️ A project with the name *{name}* already exists in this group.", parse_mode="Markdown")
-            return
-
-        insert_data = {
-            "name": name,
-            "description": description,
-            "owner_id": owner_id,
-            "group_id": group_id,
-            "raw_input": raw_input
-        }
-
-        supabase.from_("projects").insert(insert_data).execute()
-        print(f"✅ Project *{name}* created successfully!")
-        await update.message.reply_text(f"✅ Project *{name}* created successfully!", parse_mode="Markdown")
-
-    except Exception as e:
-        print(f"Error in /create_project: {e}")
-        await update.message.reply_text("❗ Failed to create project. Please try again.")
-
+    # 4. Reply to the user
+    await update.message.reply_text(message, parse_mode="Markdown")
 
 async def delete_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -126,103 +100,69 @@ async def delete_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def project_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        if not context.args:
-            await update.message.reply_text("❗ Usage: /project_details | <project_name>")
-            return
+    """
+    Command handler for /project_details.
+    Parses arguments and calls the shared service function.
+    """
+    # 1. Telegram-specific checks
+    if update.message.chat.type not in ["group", "supergroup"]:
+        await update.message.reply_text("❗ This command must be used inside a group.")
+        return
 
-        full_text = " ".join(context.args)
-        parts = [p.strip() for p in full_text.split("|")]
-        project_name = parts[0] if parts else None
+    # 2. Parse arguments
+    if not context.args:
+        await update.message.reply_text("❗ Usage: /project_details <project_name>")
+        return
+        
+    # The project name is the entire text after the command
+    project_name = " ".join(context.args)
 
-        if not project_name:
-            await update.message.reply_text("❗ Please provide a valid project name.")
-            return
+    # 3. Call the shared service function
+    success, message = _project_details_service(
+        telegram_user_id=update.effective_user.id,
+        group_id=update.effective_chat.id,
+        project_name=project_name
+    )
 
-        telegram_id = update.effective_user.id
-        user_data = get_user_from_telegram(telegram_id)
-        if not user_data:
-            await update.message.reply_text("❌ Please link your Telegram account first using /link")
-            return
-
-        group_id = update.effective_chat.id if update.effective_chat.type in ["group", "supergroup"] else None
-        if not group_id:
-            await update.message.reply_text("❗ This command must be used inside a group.")
-            return
-
-        response = supabase.from_("projects").select("*")\
-            .eq("name", project_name).eq("group_id", group_id).single().execute()
-
-        if not response.data:
-            await update.message.reply_text(f"❌ No project named *{project_name}* found in this group.", parse_mode="Markdown")
-            return
-
-        project = response.data
-        text = (
-            f"📋 *Project Details*\n\n"
-            f"🆔 ID: `{project['id']}`\n"
-            f"📛 Name: *{project['name']}*\n"
-            f"🧾 Description: {project.get('description', '—')}\n"
-            f"🧠 Raw Input: {project.get('raw_input', '—')}\n"
-            f"👤 Owner ID: `{project['owner_id']}`\n"
-            f"🕒 Created At: {project.get('created_at', '—')}"
-        )
-
-        await update.message.reply_text(text, parse_mode="Markdown")
-
-    except Exception as e:
-        print(f"Error in project_details: {e}")
-        await update.message.reply_text("❗ Something went wrong while fetching project details.")
+    # 4. Reply to the user
+    await update.message.reply_text(message, parse_mode="Markdown")
         
         
+# This dictionary holds the state for pending file uploads
 AWAITING_FILE_UPLOAD = {}
 
 async def project_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Command: /project_files | <Project_name>
-    Prompts user to upload a file and links it to the project.
+    Command handler for /project_files.
+    Calls the service to validate the project, then sets the state to await a file.
     """
-    try:
-        user = get_user_from_telegram(update.effective_user.id)
-        if not user:
-            await update.message.reply_text("❗ Please link your Telegram account using /link.")
-            return
+    # 1. Parse arguments
+    if not context.args:
+        await update.message.reply_text("❗ Usage: /project_files <Project_name>")
+        return
 
-        if not context.args:
-            await update.message.reply_text("❗ Usage: /project_files | <Project_name>")
-            return
-        
-        print(f"Context args: {context.args}")
+    project_name = " ".join(context.args)
 
-        full_text = " ".join(context.args)
-        parts = [p.strip() for p in full_text.split("|") if p.strip()]
+    # 2. Call the service function to get project details
+    success, result_data = _project_files_service(
+        telegram_user_id=update.effective_user.id,
+        group_id=update.effective_chat.id,
+        project_name=project_name
+    )
 
-        project_name = parts[0] if parts else None
-        
-        print(f"Project name: {project_name}")
-
-        if not project_name:
-            await update.message.reply_text("❗ Project name is required.")
-            return
-
-        group_id = update.effective_chat.id
-        project_res = supabase.from_("projects").select("id").eq("name", project_name).eq("group_id", group_id).execute()
-
-        if not project_res.data:
-            await update.message.reply_text(f"❌ No project found with name: *{project_name}*", parse_mode="Markdown")
-            return
-
-        project_id = project_res.data[0]["id"]
+    # 3. Handle the result
+    if success:
+        # If successful, set the state in the global dictionary
         AWAITING_FILE_UPLOAD[update.effective_user.id] = {
-            "project_id": project_id,
-            "user_id": user["id"]
+            "project_id": result_data["project_id"],
+            "user_id": result_data["user_id"]
         }
-
+        # Prompt the user for the file
         await update.message.reply_text("📎 Please upload the file you want to attach to this project.")
+    else:
+        # If it failed, send the error message from the service
+        await update.message.reply_text(result_data["error_message"], parse_mode="Markdown")
 
-    except Exception as e:
-        print(f"Error in handle_project_files: {e}")
-        await update.message.reply_text("❗ Something went wrong. Please try again.")
 
 async def handle_document_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -284,59 +224,55 @@ async def handle_document_upload(update: Update, context: ContextTypes.DEFAULT_T
 
 async def get_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Usage: /get_files | ProjectName
+    Command handler for /get_files.
+    Calls the service to get file info, then downloads and sends each file.
     """
-    try:
-        full_text = " ".join(context.args)
-        parts = [p.strip() for p in full_text.split("|") if p.strip()]
-        project_name = parts[0] if parts else None
+    if not context.args:
+        await update.message.reply_text("❗ Usage: /get_files <ProjectName>")
+        return
 
-        if not project_name:
-            await update.message.reply_text("❗ Please provide a project name.\nFormat: `/get_files | ProjectName`", parse_mode="Markdown")
-            return
+    project_name = " ".join(context.args)
 
-        # Get project ID
-        project_resp = supabase.from_("projects").select("id").eq("name", project_name).execute()
-        if not project_resp.data or len(project_resp.data) == 0:
-            await update.message.reply_text(f"❗ No project found with name *{project_name}*", parse_mode="Markdown")
-            return
+    # Call the service to get the list of file information
+    success, files_info, actual_project_name = _get_files_service(
+        telegram_user_id=update.effective_user.id,
+        group_id=update.effective_chat.id,
+        project_name=project_name
+    )
 
-        project_id = project_resp.data[0]["id"]
+    if not success:
+        # If the service failed, the third item in the tuple is the error message
+        await update.message.reply_text(actual_project_name, parse_mode="Markdown")
+        return
+    
+    if not files_info:
+        # If there are no files, the third item is the "no files" message
+        await update.message.reply_text(actual_project_name)
+        return
 
-        # Get file metadata
-        files_resp = supabase.from_("project_files").select("*").eq("project_id", project_id).execute()
-        files = files_resp.data
+    await update.message.reply_text(f"📂 Sending {len(files_info)} file(s) for project **{actual_project_name}**...", parse_mode="Markdown")
 
-        if not files:
-            await update.message.reply_text("📭 No files attached to this project.")
-            return
+    for file_data in files_info:
+        try:
+            storage_path = f"project-files/{file_data['custom_name']}"
+            
+            # Download file from Supabase storage
+            file_bytes = supabase.storage.from_("project-file-storage").download(storage_path)
 
-        await update.message.reply_text(f"📂 Sending {len(files)} file(s) for project *{project_name}*...", parse_mode="Markdown")
+            # Manually fetch the uploader's username
+            uploader = "an unknown user"
+            uploader_id = file_data.get("uploaded_by")
+            if uploader_id:
+                user_res = supabase.from_("telegram_users").select("telegram_username").eq("id", uploader_id).single().execute()
+                if user_res.data and user_res.data.get("telegram_username"):
+                    uploader = user_res.data["telegram_username"]
 
-        for file in files:
-            storage_path = f"project-files/{file['custom_name']}"
-
-            # Create a temp path
-            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-                tmp_path = tmp_file.name
-
-            # Download file from Supabase
-            res = supabase.storage.from_("project-file-storage").download(storage_path)
-            with open(tmp_path, "wb") as f:
-                f.write(res)
-                
-            #get user name from user_id
-            user_name = supabase.from_("telegram_users").select("telegram_username").eq("id", file['uploaded_by']).execute().data[0]["telegram_username"]
-
-            # Send to Telegram
+            # Send the document directly from memory
             await update.message.reply_document(
-                document=InputFile(tmp_path, filename=file["filename"]),
-                caption=f"{file['filename']} (uploaded by user: {user_name})"
+                document=file_bytes,
+                filename=file_data["filename"],
+                caption=f"{file_data['filename']} (uploaded by @{uploader})"
             )
-
-            # Clean temp
-            os.remove(tmp_path)
-
-    except Exception as e:
-        print(f"Error in handle_get_files: {e}")
-        await update.message.reply_text("❗ Failed to retrieve files.")
+        except Exception as e:
+            print(f"Error sending file {file_data.get('filename')}: {e}")
+            await update.message.reply_text(f"⚠️ Could not send file: {file_data.get('filename')}")
