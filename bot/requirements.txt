@@ -5,3 +5,6 @@ langgraph
 langchain
 openai
 langchain_openai
+jsonschema
+litellm
+groq

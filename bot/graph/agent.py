@@ -3,7 +3,7 @@ import datetime
 import re
 from typing import TypedDict, Dict
 from langgraph.graph import StateGraph, END
-from utils.ai_client import get_ai_client
+from utils.ai_client import get_model_name
 
 # ---- 1. DEFINE THE AGENT'S STATE ----
 # We've added 'action' and 'params' to the state.
@@ -105,41 +105,35 @@ def extract_json_from_content(content: str) -> dict:
         print(f"--- Problematic JSON String: {json_str!r} ---")
         raise
 
-async def user_intent_node(state: AgentState):
+async def user_intent_node(state: AgentState) -> dict:
     """
-    Analyzes the user's input to determine their intent and extract parameters.
-    This node populates the 'action' and 'params' fields in the state.
+    Analyzes the user's input using LiteLLM with Groq.
     """
-    print("--- 🧠 Running Intent Node ---")
+    print("--- 🧠 Running Intent Node (Groq via LiteLLM) ---")
     
     try:
-        client = get_ai_client()
-        print(f"--- AI Client: {client!r} ---")
         today = datetime.date.today()
         formatted_date = today.strftime('%A, %B %d, %Y')
         final_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(current_date=formatted_date)
 
-        response = await client.chat.completions.create(
-            model="mistralai/mistral-7b-instruct",
+        # Call the model using litellm's acompletion for async operations
+        response = await litellm.acompletion(
+            model=get_model_name(),
             messages=[
                 {"role": "system", "content": final_system_prompt},
                 {"role": "user", "content": state['input']}
             ],
-            response_format={"type": "json_object"},
+            response_format={"type": "json_object"}, # LiteLLM supports this for compatible models
         )
         
         content = response.choices[0].message.content
         
-        # Add debugging info
         print(f"--- AI Raw Content: {content!r} ---")
         
-        # Use the robust JSON extraction function
         result_json = extract_json_from_content(content)
 
-        # Validate the structure
         if not isinstance(result_json, dict):
             raise TypeError(f"AI response is not a dictionary: {type(result_json)}")
-        
         if "action" not in result_json or "params" not in result_json:
             raise ValueError(f"AI response missing required keys. Got: {list(result_json.keys())}")
 
@@ -151,19 +145,12 @@ async def user_intent_node(state: AgentState):
             "response": f"Action: `{result_json.get('action')}`\nParameters: `{result_json.get('params', {})}`"
         }
 
-    except (json.JSONDecodeError, TypeError, ValueError) as e:
-        print(f"--- ⚠️ Error parsing AI response: {e} ---")
-        return {
-            "action": "general_chat",
-            "params": {},
-            "response": "Sorry, I had trouble understanding the response from the AI. Please try rephrasing your request."
-        }
     except Exception as e:
         print(f"--- 💥 An unexpected error occurred in intent node: {e} ---")
         return {
             "action": "general_chat",
             "params": {},
-            "response": "An unexpected error occurred. Please try again."
+            "response": "An unexpected error occurred while processing your request with the AI."
         }
     
     
