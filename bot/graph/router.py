@@ -2,11 +2,13 @@ from graph.state import AgentState
 
 def route_actions(state: AgentState) -> str:
     """
-    A placeholder router. For now, it just prints the action and ends the graph.
+    Determines the next node to execute based on the 'action' in the state.
     """
     action = state.get("action")
     print(f"--- 🚦 Routing action: {action} ---")
 
-    # In the future, this will return the name of a tool node.
-    # For now, we simply end the graph for all actions.
+    if action == "create_task":
+        return "create_task_tool"
+    
+    # For any other action, or if the action is missing, end the conversation.
     return "__end__"

@@ -74,7 +74,6 @@ async def user_intent_node(state: AgentState) -> dict:
         formatted_date = today.strftime('%A, %B %d, %Y')
         final_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(current_date=formatted_date)
 
-        # 3. Call the model using litellm's async completion function
         response = await litellm.acompletion(
             model=get_model_name(),
             messages=[
@@ -97,16 +96,19 @@ async def user_intent_node(state: AgentState) -> dict:
 
         print(f"--- Intent Found: {result_json} ---")
 
+        # --- THIS IS THE FIX ---
+        # This now only returns the new information ('action' and 'params').
+        # LangGraph will merge this into the existing state, preserving
+        # the 'telegram_user_id' and 'chat_id' for the next step.
         return {
             "action": result_json.get("action"),
-            "params": result_json.get("params", {}),
-            "response": f"Action: `{result_json.get('action')}`\nParameters: `{result_json.get('params', {})}`"
+            "params": result_json.get("params", {})
         }
 
     except Exception as e:
         print(f"--- 💥 An unexpected error occurred in intent node: {e} ---")
+        # If the AI fails, we set a response message directly.
+        # This will be sent back to the user by the ai_handler.
         return {
-            "action": "general_chat",
-            "params": {},
             "response": "An unexpected error occurred while processing your request with the AI."
         }
