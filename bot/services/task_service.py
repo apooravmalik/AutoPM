@@ -73,48 +73,71 @@ def _assign_task_service(
     admin_telegram_user_id: int,
     group_id: int,
     assignee_username: str,
-    task_name: str
+    task_name: str = None,
+    task_id: str = None # Add task_id as an optional parameter
 ) -> Tuple[bool, str]:
     """
-    Core logic to assign a task, using a manual filter to bypass the .ilike() error.
+    Core logic to assign a task to a user, finding the task by ID or by name.
+    Returns a tuple: (success, message).
     """
     try:
-        # 1. Permission & User checks (remain the same)
+        # 1. Permission checks (same as before)
         admin_user_data = get_user_from_telegram(admin_telegram_user_id)
         if not admin_user_data or not check_admin_permission(admin_user_data["id"], group_id):
             return (False, "❌ Sorry, only admins can assign tasks.")
 
+        # 2. Find the assignee by their username (same as before)
         clean_username = assignee_username.replace("@", "")
         assignee_user = supabase.from_("telegram_users").select("id").eq("telegram_username", clean_username).single().execute()
+        
         if not assignee_user.data:
-            return (False, f"❌ User @{clean_username} not found or not linked.")
+            return (False, f"❌ User @{clean_username} not found or not linked to the bot.")
+            
         assignee_id = assignee_user.data["id"]
 
-        # 2. WORKAROUND: Fetch all pending tasks and filter in Python
-        all_pending_tasks_res = supabase.from_("tasks").select("*").eq("group_id", group_id).eq("status", "Pending").execute()
-        
-        matching_tasks = []
-        if all_pending_tasks_res.data:
-            for task in all_pending_tasks_res.data:
-                if task_name.lower() in task['title'].lower():
-                    matching_tasks.append(task)
+        # 3. Find the task (ID takes priority)
+        task = None
+        if task_id:
+            # If an ID is provided (from a reply), find the task directly.
+            task_res = supabase.from_("tasks").select("*").eq("id", task_id).eq("group_id", group_id).single().execute()
+            if task_res.data:
+                task = task_res.data
+        elif task_name:
+            # If no ID, fall back to searching by name (using our workaround)
+            all_pending_tasks_res = supabase.from_("tasks").select("*").eq("group_id", group_id).eq("status", "Pending").execute()
+            matching_tasks = []
+            if all_pending_tasks_res.data:
+                for t in all_pending_tasks_res.data:
+                    if task_name.lower() in t['title'].lower():
+                        matching_tasks.append(t)
+            
+            if len(matching_tasks) == 1:
+                task = matching_tasks[0]
+            elif len(matching_tasks) > 1:
+                return (False, f"❌ Multiple pending tasks found matching '{task_name}'. Please be more specific.")
 
-        # 3. Handle results (remain the same)
-        if not matching_tasks:
-            return (False, f"❌ No pending task found matching '{task_name}'.")
-        if len(matching_tasks) > 1:
-            task_list = "\n".join([f"• {task['title']}" for task in matching_tasks[:5]])
-            return (False, f"❌ Multiple tasks found:\n{task_list}\n\nPlease be more specific.")
+        if not task:
+            return (False, f"❌ No pending task found for the given details.")
         
-        task = matching_tasks[0]
-        
-        # 4. Update and Log (remain the same)
-        update_result = supabase.from_("tasks").update({"assigned_to": assignee_id, "status": "Assigned"}).eq("id", task["id"]).execute()
+        # 4. Update the task with the assignee and new status
+        update_result = supabase.from_("tasks").update({
+            "assigned_to": assignee_id,
+            "status": "Assigned"
+        }).eq("id", task["id"]).execute()
+
         if not update_result.data:
             return (False, "❌ Failed to update the task in the database.")
-        
-        supabase.from_("status_logs").insert({"task_id": task["id"], "employee_id": assignee_id, "status": "assigned", "group_id": group_id, "notes": f"Task assigned to @{clean_username} by admin"}).execute()
 
+        # 5. Log the assignment event (same as before)
+        supabase.from_("status_logs").insert({
+            "task_id": task["id"],
+            "employee_id": assignee_id,
+            "status": "assigned",
+            "group_id": group_id,
+            "notes": f"Task assigned to @{clean_username} by admin"
+        }).execute()
+
+        # 6. Return a success message (same as before)
         success_message = f"✅ **Task Assigned!**\n📋 **Task:** {task['title']}\n👤 **To:** @{clean_username}"
         return (True, success_message)
 

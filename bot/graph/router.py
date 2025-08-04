@@ -9,6 +9,7 @@ def route_actions(state: AgentState) -> str:
 
     if action == "create_task":
         return "create_task_tool"
+    if action == "assign_task":
+        return "assign_task_tool"
     
-    # For any other action, or if the action is missing, end the conversation.
     return "__end__"

@@ -1,4 +1,4 @@
-from typing import TypedDict, Dict
+from typing import TypedDict, Dict, Optional
 
 class AgentState(TypedDict):
     """
@@ -10,3 +10,4 @@ class AgentState(TypedDict):
     response: str   # The final message to send back to the user
     telegram_user_id: int # The Telegram user ID
     chat_id: int   # The Telegram chat ID
+    task_id_from_reply: Optional[str] # Optional task ID from a reply, if applicable

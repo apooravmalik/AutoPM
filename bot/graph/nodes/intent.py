@@ -37,6 +37,12 @@ Your JSON Output:
 User Request: "Create a task 'Fix Bug' in project 'Test' for @Apoorav Malik due tomorrow"
 Your JSON Output:
 {{"action": "create_task", "params": {{"name": "Fix Bug", "description": null, "project_name": "Test", "assignee": "@Apoorav Malik", "deadline": "2025-07-20"}}}}
+
+**Example 3: Assign Task (With Context)**
+User Request: "assign this to @jane"
+Context: The user is referring to task ID `a1b2-c3d4`.
+Your JSON Output:
+{{"action": "assign_task", "params": {{"task_name": null, "assignee": "@jane"}}}}
 """
 
 
@@ -74,37 +80,34 @@ async def user_intent_node(state: AgentState) -> dict:
         formatted_date = today.strftime('%A, %B %d, %Y')
         final_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(current_date=formatted_date)
 
+
+        # Build a more detailed prompt for the AI, including context if it exists.
+        user_input = state['input']
+        context_text = ""
+        if state.get("task_id_from_reply"):
+            context_text = f"\nContext: The user is referring to task ID `{state['task_id_from_reply']}`."
+        
+        full_user_prompt = user_input + context_text
+        
         response = await litellm.acompletion(
             model=get_model_name(),
             messages=[
                 {"role": "system", "content": final_system_prompt},
-                {"role": "user", "content": state['input']}
+                {"role": "user", "content": full_user_prompt} # Use the new, context-aware prompt
             ],
             response_format={"type": "json_object"},
         )
         
         content = response.choices[0].message.content
-        
-        print(f"--- AI Raw Content: {content!r} ---")
-        
         result_json = extract_json_from_content(content)
-
-        if not isinstance(result_json, dict):
-            raise TypeError(f"AI response is not a dictionary: {type(result_json)}")
-        if "action" not in result_json or "params" not in result_json:
-            raise ValueError(f"AI response missing required keys. Got: {list(result_json.keys())}")
 
         print(f"--- Intent Found: {result_json} ---")
 
-        # --- THIS IS THE FIX ---
-        # This now only returns the new information ('action' and 'params').
-        # LangGraph will merge this into the existing state, preserving
-        # the 'telegram_user_id' and 'chat_id' for the next step.
+        # Return only the new information to merge with the existing state
         return {
             "action": result_json.get("action"),
             "params": result_json.get("params", {})
         }
-
     except Exception as e:
         print(f"--- 💥 An unexpected error occurred in intent node: {e} ---")
         # If the AI fails, we set a response message directly.

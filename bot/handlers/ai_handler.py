@@ -1,8 +1,31 @@
 # bot/services/ai_handler.py
-
+import re
 from telegram import Update
 from telegram.ext import ContextTypes
 from graph.builder import app
+
+def _parse_task_id_from_reply(text: str) -> str | None:
+    """Helper to find a task ID in a message using regex."""
+    if not text:
+        return None
+    
+    # Look for the pattern "🆔 ID: uuid" (with emoji)
+    match = re.search(r"🆔\s*ID:\s*([0-9a-fA-F-]+)", text)
+    if match:
+        return match.group(1)
+    
+    # Fallback: Look for the pattern "ID: `uuid`" (with backticks)
+    match = re.search(r"ID:\s*`([0-9a-fA-F-]+)`", text)
+    if match:
+        return match.group(1)
+    
+    # Another fallback: Look for just "ID: uuid" (plain text)
+    match = re.search(r"ID:\s*([0-9a-fA-F-]+)", text)
+    if match:
+        return match.group(1)
+    
+    return None
+
 
 async def route_to_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -16,6 +39,16 @@ async def route_to_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not command_text:
         await update.message.reply_text("Please provide a command after mentioning me.")
         return
+    
+    # Check for a replied-to message and try to parse a task ID
+    task_id_from_reply = None
+    if update.message.reply_to_message and update.message.reply_to_message.text:
+        replied_text = update.message.reply_to_message.text
+        print(f"--- DEBUG: Replied-to message text: {replied_text!r} ---")
+        
+        task_id_from_reply = _parse_task_id_from_reply(replied_text)
+        
+    print(f"----task id received: {task_id_from_reply}----")
 
     try:
         print(f"--- 📝 User Command: {command_text} ---")
@@ -24,8 +57,10 @@ async def route_to_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
         initial_state = {
             "input": command_text,
             "telegram_user_id": update.effective_user.id,
-            "chat_id": update.message.chat.id
+            "chat_id": update.message.chat.id,
+            "task_id_from_reply": task_id_from_reply
         }
+        print(f"----task id received: {task_id_from_reply}----")
         print(f"--- 📝 Initial State: {initial_state} ---")
         print("--- 🧠 Starting the AI Agent ---")
         # 2. This is where you call your agent.

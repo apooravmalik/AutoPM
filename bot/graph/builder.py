@@ -1,33 +1,32 @@
 from langgraph.graph import StateGraph, END
 from graph.state import AgentState
 from graph.nodes.intent import user_intent_node
-from graph.nodes.tools import create_task_tool
+from graph.nodes.tools import create_task_tool, assign_task_tool # Import the new tool
 from graph.router import route_actions
 
-# Define the workflow
 workflow = StateGraph(AgentState)
 
-# Add the nodes to the graph
-workflow.add_node("intent", user_intent_node)
-workflow.add_node("create_task_tool", create_task_tool)
+# Add the nodes
+workflow.add_node("intent", user_intent_node) #Node for Intent
+workflow.add_node("create_task_tool", create_task_tool) #Node for Create Task tool
+workflow.add_node("assign_task_tool", assign_task_tool) # Node for Assign Tool
 
-# Set the entry point for the graph
 workflow.set_entry_point("intent")
 
-# Add the conditional router.
-# After the 'intent' node, the 'route_actions' function will be called.
-# Based on its return value, the graph will transition to the specified node.
+# Add the conditional router
 workflow.add_conditional_edges(
     "intent",
     route_actions,
     {
-        "create_task_tool": "create_task_tool",
+        "create_task_tool": "create_task_tool", # Route to Create Task tool
+        "assign_task_tool": "assign_task_tool", # Route to Assign Task tool
+        # If no action matches, end the workflow
         "__end__": END
     }
 )
 
-# After the tool is executed, the graph ends.
+# Add edges from all tools back to the end
 workflow.add_edge("create_task_tool", END)
+workflow.add_edge("assign_task_tool", END)
 
-# Compile the graph into our final, runnable app
 app = workflow.compile()
