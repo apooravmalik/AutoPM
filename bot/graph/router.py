@@ -11,5 +11,9 @@ def route_actions(state: AgentState) -> str:
         return "create_task_tool"
     if action == "assign_task":
         return "assign_task_tool"
+    if action == "create_project":
+        return "create_project_tool"
+    if action == "project_details":
+        return "project_details_tool"
     
     return "__end__"

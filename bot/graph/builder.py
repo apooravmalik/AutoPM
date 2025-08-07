@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, END
 from graph.state import AgentState
 from graph.nodes.intent import user_intent_node
-from graph.nodes.tools import create_task_tool, assign_task_tool # Import the new tool
+from graph.nodes.tools import create_task_tool, assign_task_tool, create_project_tool, project_details_tool
 from graph.router import route_actions
 
 workflow = StateGraph(AgentState)
@@ -10,6 +10,8 @@ workflow = StateGraph(AgentState)
 workflow.add_node("intent", user_intent_node) #Node for Intent
 workflow.add_node("create_task_tool", create_task_tool) #Node for Create Task tool
 workflow.add_node("assign_task_tool", assign_task_tool) # Node for Assign Tool
+workflow.add_node("create_project_tool", create_project_tool) # Node for Create Project tool
+workflow.add_node("project_details_tool", project_details_tool) # Node for Project Details tool
 
 workflow.set_entry_point("intent")
 
@@ -20,6 +22,8 @@ workflow.add_conditional_edges(
     {
         "create_task_tool": "create_task_tool", # Route to Create Task tool
         "assign_task_tool": "assign_task_tool", # Route to Assign Task tool
+        "create_project_tool": "create_project_tool", # Route to Create Project tool
+        "project_details_tool": "project_details_tool", # Route to Project Details tool
         # If no action matches, end the workflow
         "__end__": END
     }
@@ -28,5 +32,7 @@ workflow.add_conditional_edges(
 # Add edges from all tools back to the end
 workflow.add_edge("create_task_tool", END)
 workflow.add_edge("assign_task_tool", END)
+workflow.add_edge("create_project_tool", END)
+workflow.add_edge("project_details_tool", END)
 
 app = workflow.compile()

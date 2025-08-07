@@ -14,16 +14,16 @@ The JSON object MUST have two keys: "action" and "params".
 1.  **"action"**: This value MUST be one of the following strings:
     - 'create_task', 'assign_task', 'working_task', 'completed_task', 'list_tasks', 'history', 'delete_task', 'task_details', 'create_project', 'delete_project', 'project_details', 'project_files', 'get_files', 'link', 'general_chat'.
 
-2.  **"params"**: This is a dictionary of parameters for the action. The allowed keys for each action are defined in the "Parameter Schemas" section below. If a parameter is not found, its value MUST be `null`.
+2.  **"params"**: This is a dictionary of parameters for the action. The allowed keys for each action are defined in the "Parameter Schemas" section below. If a required parameter (like a project or task name) is not found in the user's request, its value MUST be `null`. Do not invent or assume values.
 
 3.  **Date Handling**: The current date is **{current_date}**. All extracted dates must be resolved to the `YYYY-MM-DD` format.
 
 4.  **Parameter Schemas**:
     - For 'create_task': `params` can include `name`, `description`, `project_name`, `assignee`, `deadline`.
-    - For 'create_project': `params` can include `name`, `description`, `raw_input`.
+    - For 'create_project': `params` must include `name`. `description` and `raw_input` are optional.
     - For 'assign_task': `params` must include `task_name`, `assignee`.
     - For 'delete_task': `params` must include `task_id`.
-    - For 'project_details', 'project_files', 'get_files': `params` must include `project_name`.
+    - For 'project_details', 'project_files', 'get_files': `params` must include `project_name`. This is for when a user wants "details" or "information".
     - For all other actions, extract relevant entities as seen in the user's request.
 
 Your final output MUST ONLY be the valid JSON object. Do not add explanations or markdown.
@@ -37,12 +37,32 @@ Your JSON Output:
 User Request: "Create a task 'Fix Bug' in project 'Test' for @Apoorav Malik due tomorrow"
 Your JSON Output:
 {{"action": "create_task", "params": {{"name": "Fix Bug", "description": null, "project_name": "Test", "assignee": "@Apoorav Malik", "deadline": "2025-07-20"}}}}
-
+---
 **Example 3: Assign Task (With Context)**
 User Request: "assign this to @jane"
 Context: The user is referring to task ID `a1b2-c3d4`.
 Your JSON Output:
 {{"action": "assign_task", "params": {{"task_name": null, "assignee": "@jane"}}}}
+---
+**Example 4: Create Project (Error)**
+User Request: "create a project with the description 'A new project'"
+Your JSON Output:
+{{"action": "create_project", "params": {{"name": null, "description": "A new project", "raw_input": null}}}}
+---
+**Example 5: Create Project (Error)**
+User Request: "create a project"
+Your JSON Output:
+{{"action": "create_project", "params": {{"name": null, "description": null, "raw_input": null}}}}
+---
+**Example 6: Project Details**
+User Request: "show me the details for the 'Q3 Marketing Campaign' project"
+Your JSON Output:
+{{"action": "project_details", "params": {{"project_name": "Q3 Marketing Campaign"}}}}
+---
+**Example 7: Project Details**
+User Request: "give me information on the 'Mobile App Refactor' project"
+Your JSON Output:
+{{"action": "project_details", "params": {{"project_name": "Mobile App Refactor"}}}}
 """
 
 
