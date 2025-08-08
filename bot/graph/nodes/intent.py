@@ -24,6 +24,7 @@ The JSON object MUST have two keys: "action" and "params".
     - For 'assign_task': `params` must include `task_name`, `assignee`.
     - For 'delete_task': `params` must include `task_id`.
     - For 'project_details', 'project_files', 'get_files': `params` must include `project_name`. This is for when a user wants "details" or "information".
+    - For 'answer_project_question': `params` must include `project_name` and `question`.
     - For all other actions, extract relevant entities as seen in the user's request.
 
 Your final output MUST ONLY be the valid JSON object. Do not add explanations or markdown.
@@ -63,6 +64,16 @@ Your JSON Output:
 User Request: "give me information on the 'Mobile App Refactor' project"
 Your JSON Output:
 {{"action": "project_details", "params": {{"project_name": "Mobile App Refactor"}}}}
+---
+**Example 8: Ask Question about Project**
+User Request: "What is the basic plan for the 'Mobile App Refactor' project?"
+Your JSON Output:
+{{"action": "answer_project_question", "params": {{"project_name": "Mobile App Refactor", "question": "What is the basic plan for the project?"}}}}
+---
+**Example 9: Ask Question about Project (RAG)**
+User Request: "Can you tell me about the files in the 'Mobile App Refactor' project?"
+Your JSON Output:
+{{"action": "answer_project_question", "params": {{"project_name": "Mobile App Refactor", "question": "What are the files in the project?"}}}}
 """
 
 

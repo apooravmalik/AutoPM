@@ -1,6 +1,105 @@
 from typing import Tuple, Dict, Any, List
 from utils.supabaseClient import supabase
 from utils.auth_helper import get_user_from_telegram, check_admin_permission
+from sentence_transformers import SentenceTransformer
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from sentence_transformers import SentenceTransformer
+import numpy as np
+import litellm
+from utils.ai_client import get_model_name
+
+embeddings_model = SentenceTransformer('all-MiniLM-L6-v2')
+
+def _embed_and_store_file_content(project_id: str, file_content: str) -> bool:
+    """
+    Generates embeddings for file content using a local model and updates the project record.
+    """
+    try:
+        print(f"--- 🧠 Generating embeddings for project {project_id} using a local model ---")
+        
+        # 1. Split the document into chunks
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        chunks = text_splitter.split_text(file_content)
+
+        if not chunks:
+            print(f"--- ⚠️ No text chunks to embed for project {project_id} ---")
+            return False
+
+        # 2. Generate embeddings for the chunks using SentenceTransformer
+        # The .encode() method returns a list of numpy arrays.
+        embeddings = embeddings_model.encode(chunks)
+        
+        # 3. Average the embeddings to get a single vector for the document
+        avg_embedding = np.mean(embeddings, axis=0)
+
+        # 4. Convert numpy array to a list for JSON serialization before storing
+        embedding_list = avg_embedding.tolist()
+
+        # 5. Update the project table with the new embedding
+        response = supabase.from_("projects").update({
+            "embedding": embedding_list
+        }).eq("id", project_id).execute()
+        
+        if response.data:
+            print(f"--- ✅ Embeddings stored for project {project_id} ---")
+            return True
+        else:
+            print(f"--- ❌ Failed to store embeddings for project {project_id}. Response: {response.error} ---")
+            return False
+
+    except Exception as e:
+        print(f"Error in _embed_and_store_file_content: {e}")
+        return False
+
+async def _answer_project_question_service(
+    project_name: str,
+    question: str,
+    group_id: int
+) -> Tuple[bool, str]:
+    """
+    Answers a user's question about a project using RAG.
+    """
+    try:
+        print(f"--- ❓ Answering question about project: {project_name} ---")
+
+        # 1. Find the project to get its embedding
+        project_res = supabase.from_("projects").select("embedding").eq("name", project_name).eq("group_id", group_id).single().execute()
+        if not project_res.data or not project_res.data.get("embedding"):
+            return (False, f"Could not find the project '{project_name}' or it has no files attached.")
+
+        # 2. Generate an embedding for the user's question
+        question_embedding = embeddings_model.encode(question).tolist()
+
+        # 3. Call the Supabase RPC function to find matching context
+        match_response = supabase.rpc('match_project_embeddings', {
+            'query_embedding': question_embedding,
+            'match_threshold': 0.7,  # Adjust this threshold as needed
+            'match_count': 5
+        }).execute()
+
+        if not match_response.data:
+            return (False, "I couldn't find any relevant information in the project files to answer your question.")
+
+        # 4. Construct the context for the LLM
+        context = "Relevant information from project documents:\n"
+        for match in match_response.data:
+            context += f"- {match['description']}\n"
+
+        # 5. Call the LLM with the context and question
+        response = await litellm.acompletion(
+            model=get_model_name(),
+            messages=[
+                {"role": "system", "content": "You are a helpful project assistant. Answer the user's question based on the provided context. If the context is not sufficient, say so."},
+                {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
+            ]
+        )
+        
+        answer = response.choices[0].message.content
+        return (True, answer)
+
+    except Exception as e:
+        print(f"Error in _answer_project_question_service: {e}")
+        return (False, "An error occurred while trying to answer your question.")
 
 def _create_project_service(
     telegram_user_id: int,

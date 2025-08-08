@@ -1,6 +1,6 @@
 from graph.state import AgentState
 from services.task_service import _create_task_service, _assign_task_service
-from services.project_service import _create_project_service, _project_details_service
+from services.project_service import _create_project_service, _project_details_service, _answer_project_question_service
 
 async def create_task_tool(state: AgentState) -> dict:
     """
@@ -106,4 +106,24 @@ async def project_details_tool(state: AgentState) -> dict:
     )
 
     # 3. Return the final message to the agent's state
+    return {"response": message}
+
+async def answer_project_question_tool(state: AgentState) -> dict:
+    """
+    Tool to answer a user's question about a project using RAG.
+    """
+    print("--- 🛠️ Running Answer Project Question Tool ---")
+    params = state.get("params", {})
+    
+    project_name = params.get("project_name")
+    question = params.get("question")
+
+    if not project_name or not question:
+        return {"response": "Please specify which project you are asking about and what your question is."}
+
+    success, message = await _answer_project_question_service(
+        project_name=project_name,
+        question=question,
+        group_id=state.get("chat_id")
+    )
     return {"response": message}

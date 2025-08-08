@@ -6,7 +6,9 @@ from utils.auth_helper import get_user_from_telegram, check_admin_permission
 import os
 from uuid import uuid4
 import tempfile
-from services.project_service import _create_project_service, _project_details_service, _project_files_service, _get_files_service
+from services.project_service import _create_project_service, _project_details_service, _project_files_service, _get_files_service, _embed_and_store_file_content
+from utils.file_utils import read_text_from_file
+import json
 
 async def create_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -166,60 +168,68 @@ async def project_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_document_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Handles file uploads after the /project_files command.
+    Handles file uploads, extracts text using file_utils, and triggers embedding.
     """
     try:
         user_id = update.effective_user.id
         file_data = AWAITING_FILE_UPLOAD.get(user_id)
         if not file_data:
-            return  # Not waiting for this user’s upload
+            return
 
         file: Document = update.message.document
         if not file:
-            await update.message.reply_text("❗ Please send a valid file (PDF/TXT).")
+            await update.message.reply_text("❗ Please send a valid document.")
             return
 
         project_id = file_data["project_id"]
         uploaded_by = file_data["user_id"]
-
-        # Download file from Telegram
         file_name = file.file_name
-        file_ext = os.path.splitext(file_name)[1].lower()
-        file_unique_name = f"{project_id}_{file_name}"
+        file_unique_name = f"{project_id}_{uuid4()}_{file_name}"
 
-        # Download to temp
+        # Download file to a temporary path
         telegram_file = await context.bot.get_file(file.file_id)
         temp_dir = tempfile.gettempdir()
         temp_path = os.path.join(temp_dir, file_unique_name)
         await telegram_file.download_to_drive(temp_path)
 
-        # Upload to Supabase bucket
+        # Use the file utility to read content based on file type
+        file_content = read_text_from_file(temp_path)
+
+        if not file_content:
+            await update.message.reply_text(f"⚠️ Could not extract text from *{file_name}*. The file might be empty, corrupted, or an unsupported format.", parse_mode="Markdown")
+        else:
+            # If content was extracted, call the service to generate and store embeddings
+            embedding_success = _embed_and_store_file_content(project_id, file_content)
+            if not embedding_success:
+                 await update.message.reply_text(f"⚠️ Failed to create embeddings for *{file_name}*.", parse_mode="Markdown")
+
+        # Upload the original file to Supabase Storage
         with open(temp_path, "rb") as f:
             supabase.storage.from_("project-file-storage").upload(
                 path=f"project-files/{file_unique_name}",
                 file=f,
-                file_options={"content-type": file.mime_type}
+                file_options={"content-type": file.mime_type, "upsert": "true"}
             )
 
-        # Insert metadata into DB
+        # Insert metadata into the database
         supabase.from_("project_files").insert({
             "id": str(uuid4()),
             "project_id": project_id,
             "filename": file_name,
             "custom_name": file_unique_name,
-            "type": file_ext,
+            "type": os.path.splitext(file_name)[1].lower(),
             "uploaded_by": uploaded_by
         }).execute()
 
         del AWAITING_FILE_UPLOAD[user_id]
-        await update.message.reply_text(f"✅ File *{file_name}* uploaded and tagged to project!", parse_mode="Markdown")
+        await update.message.reply_text(f"✅ File *{file_name}* uploaded and linked to the project!", parse_mode="Markdown")
 
-        # Clean temp file
+        # Clean up the temporary file
         os.remove(temp_path)
 
     except Exception as e:
         print(f"Error in handle_document_upload: {e}")
-        await update.message.reply_text("❗ Failed to upload file.")
+        await update.message.reply_text("❗ A critical error occurred while handling the file upload.")
 
 
 async def get_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
