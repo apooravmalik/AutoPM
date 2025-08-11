@@ -7,6 +7,8 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 import litellm
 from utils.ai_client import get_model_name
+import json
+from sklearn.metrics.pairwise import cosine_similarity
 
 embeddings_model = SentenceTransformer('all-MiniLM-L6-v2')
 
@@ -16,7 +18,7 @@ def _embed_and_store_file_content(project_id: str, file_content: str) -> bool:
     """
     try:
         print(f"--- 🧠 Generating embeddings for project {project_id} using a local model ---")
-        
+
         # 1. Split the document into chunks
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         chunks = text_splitter.split_text(file_content)
@@ -26,25 +28,29 @@ def _embed_and_store_file_content(project_id: str, file_content: str) -> bool:
             return False
 
         # 2. Generate embeddings for the chunks using SentenceTransformer
-        # The .encode() method returns a list of numpy arrays.
         embeddings = embeddings_model.encode(chunks)
-        
-        # 3. Average the embeddings to get a single vector for the document
-        avg_embedding = np.mean(embeddings, axis=0)
 
-        # 4. Convert numpy array to a list for JSON serialization before storing
-        embedding_list = avg_embedding.tolist()
+        # 3. Create a list of dictionaries, where each dictionary contains a chunk and its embedding
+        chunk_data = []
+        for i, chunk in enumerate(chunks):
+            chunk_data.append({
+                "content": chunk,
+                "embedding": embeddings[i].tolist()
+            })
 
-        # 5. Update the project table with the new embedding
+        # 4. Serialize the list of dictionaries to a JSON string
+        raw_input = json.dumps(chunk_data)
+
+        # 5. Update the project table with the new raw_input
         response = supabase.from_("projects").update({
-            "embedding": embedding_list
+            "raw_input": raw_input
         }).eq("id", project_id).execute()
-        
+
         if response.data:
-            print(f"--- ✅ Embeddings stored for project {project_id} ---")
+            print(f"--- ✅ Chunks and embeddings stored for project {project_id} ---")
             return True
         else:
-            print(f"--- ❌ Failed to store embeddings for project {project_id}. Response: {response.error} ---")
+            print(f"--- ❌ Failed to store chunks and embeddings for project {project_id}. Response: {response.error} ---")
             return False
 
     except Exception as e:
@@ -62,30 +68,32 @@ async def _answer_project_question_service(
     try:
         print(f"--- ❓ Answering question about project: {project_name} ---")
 
-        # 1. Find the project to get its embedding
-        project_res = supabase.from_("projects").select("embedding").eq("name", project_name).eq("group_id", group_id).single().execute()
-        if not project_res.data or not project_res.data.get("embedding"):
+        # 1. Find the project to get its raw_input
+        project_res = supabase.from_("projects").select("raw_input").eq("name", project_name).eq("group_id", group_id).single().execute()
+
+        if not project_res.data or not project_res.data.get("raw_input"):
             return (False, f"Could not find the project '{project_name}' or it has no files attached.")
 
-        # 2. Generate an embedding for the user's question
-        question_embedding = embeddings_model.encode(question).tolist()
+        # 2. Deserialize the raw_input to get the chunks and embeddings
+        chunk_data = json.loads(project_res.data["raw_input"])
 
-        # 3. Call the Supabase RPC function to find matching context
-        match_response = supabase.rpc('match_project_embeddings', {
-            'query_embedding': question_embedding,
-            'match_threshold': 0.7,  # Adjust this threshold as needed
-            'match_count': 5
-        }).execute()
+        # 3. Generate an embedding for the user's question
+        question_embedding = embeddings_model.encode([question])
 
-        if not match_response.data:
-            return (False, "I couldn't find any relevant information in the project files to answer your question.")
+        # 4. Calculate cosine similarity between the question and all chunks
+        chunk_embeddings = np.array([chunk['embedding'] for chunk in chunk_data])
+        similarities = cosine_similarity(question_embedding, chunk_embeddings)[0]
 
-        # 4. Construct the context for the LLM
+        # 5. Get the top N most similar chunks
+        top_n = 5
+        top_indices = np.argsort(similarities)[-top_n:][::-1]
+
+        # 6. Construct the context for the LLM
         context = "Relevant information from project documents:\n"
-        for match in match_response.data:
-            context += f"- {match['description']}\n"
+        for i in top_indices:
+            context += f"- {chunk_data[i]['content']}\n"
 
-        # 5. Call the LLM with the context and question
+        # 7. Call the LLM with the context and question
         response = await litellm.acompletion(
             model=get_model_name(),
             messages=[
@@ -93,7 +101,7 @@ async def _answer_project_question_service(
                 {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
             ]
         )
-        
+
         answer = response.choices[0].message.content
         return (True, answer)
 

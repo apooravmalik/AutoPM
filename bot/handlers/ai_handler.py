@@ -67,6 +67,8 @@ async def route_to_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # The input dictionary MUST match the structure of your AgentState.
         final_state = await app.ainvoke(initial_state)
         
+        print(f"--- 📝 Final State: {final_state} ---")
+        
         # 3. Get the final response from the agent's state
         response_message = final_state.get("response", "Sorry, something went wrong.")
         

@@ -12,7 +12,7 @@ You are the central router and entity extractor for a project management bot. Yo
 The JSON object MUST have two keys: "action" and "params".
 
 1.  **"action"**: This value MUST be one of the following strings:
-    - 'create_task', 'assign_task', 'working_task', 'completed_task', 'list_tasks', 'history', 'delete_task', 'task_details', 'create_project', 'delete_project', 'project_details', 'project_files', 'get_files', 'link', 'general_chat'.
+    - 'create_task', 'assign_task', 'working_task', 'completed_task', 'list_tasks', 'history', 'delete_task', 'task_details', 'create_project', 'delete_project', 'project_details', 'project_files', 'get_files', 'link', 'answer_project_question'.
 
 2.  **"params"**: This is a dictionary of parameters for the action. The allowed keys for each action are defined in the "Parameter Schemas" section below. If a required parameter (like a project or task name) is not found in the user's request, its value MUST be `null`. Do not invent or assume values.
 
@@ -41,7 +41,7 @@ Your JSON Output:
 ---
 **Example 3: Assign Task (With Context)**
 User Request: "assign this to @jane"
-Context: The user is referring to task ID `a1b2-c3d4`.
+Context Task ID: `a1b2-c3d4`
 Your JSON Output:
 {{"action": "assign_task", "params": {{"task_name": null, "assignee": "@jane"}}}}
 ---
@@ -74,6 +74,16 @@ Your JSON Output:
 User Request: "Can you tell me about the files in the 'Mobile App Refactor' project?"
 Your JSON Output:
 {{"action": "answer_project_question", "params": {{"project_name": "Mobile App Refactor", "question": "What are the files in the project?"}}}}
+---
+**Example 10: Ask a specific question about a project**
+User Request: "Can you tell for which position is the JD for in the 'Mobile App Refactor' project?"
+Your JSON Output:
+{{"action": "answer_project_question", "params": {{"project_name": "Mobile App Refactor", "question": "for which position is the JD for in the project?"}}}}
+---
+**Example 11: Another specific question**
+User Request: "in the project 'New Website', what is the deadline for the design phase?"
+Your JSON Output:
+{{"action": "answer_project_question", "params": {{"project_name": "New Website", "question": "what is the deadline for the design phase"}}}}
 """
 
 
@@ -116,7 +126,8 @@ async def user_intent_node(state: AgentState) -> dict:
         user_input = state['input']
         context_text = ""
         if state.get("task_id_from_reply"):
-            context_text = f"\nContext: The user is referring to task ID `{state['task_id_from_reply']}`."
+            print(f"--- 📝 Task ID found ---")
+            context_text = f"\nContext Task ID: {state['task_id_from_reply']}"
         
         full_user_prompt = user_input + context_text
         
