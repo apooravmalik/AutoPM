@@ -24,6 +24,7 @@ from handlers.project_handler import (
     get_files
 )
 from handlers.ai_handler import route_to_ai
+from handlers.report_handler import summary
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -69,7 +70,8 @@ app.add_handler(CommandHandler("history", task_history))
 app.add_handler(CommandHandler("delete_task", delete_task_by_id))
 app.add_handler(CommandHandler("task_details", task_details))
 
-
+# Register report handlers
+app.add_handler(CommandHandler("summary", summary))
 
 #Register project handlers
 app.add_handler(CommandHandler("create_project", create_project))
