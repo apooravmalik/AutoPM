@@ -1,6 +1,8 @@
 from graph.state import AgentState
+from utils.supabaseClient import supabase
 from services.task_service import _create_task_service, _assign_task_service
 from services.project_service import _create_project_service, _project_details_service, _answer_project_question_service
+from services.report_service import _summary_service
 
 async def create_task_tool(state: AgentState) -> dict:
     """
@@ -127,3 +129,42 @@ async def answer_project_question_tool(state: AgentState) -> dict:
         group_id=state.get("chat_id")
     )
     return {"response": message}
+
+async def summary_tool(state: AgentState) -> dict:
+    """
+    Tool to generate a summary of tasks.
+    """
+    print("--- 🛠️ Running Summary Tool ---")
+    try:
+        params = state.get("params", {})
+        project_name = params.get("project_name")
+        days = params.get("days", 7)
+
+        print(f" tools.py ----- Generating summary for project '{project_name}' in group {state.get('chat_id')} for the last {days} days")
+        if not project_name or project_name.lower() == "all projects":
+            # Get all projects
+            projects_res = supabase.from_("projects").select("name").eq("group_id", state.get("chat_id")).execute()
+            if not projects_res.data:
+                return {"response": "No projects found to summarize."}
+            
+            messages = []
+            for project in projects_res.data:
+                success, message = _summary_service(
+                    telegram_user_id=state.get("telegram_user_id"),
+                    group_id=state.get("chat_id"),
+                    project_name=project['name'],
+                    days=days
+                )
+                messages.append(message)
+            return {"response": "\n\n---\n\n".join(messages)}
+        else:
+            success, message = _summary_service(
+                telegram_user_id=state.get("telegram_user_id"),
+                group_id=state.get("chat_id"),
+                project_name=project_name,
+                days=days
+            )
+            return {"response": message}
+    except Exception as e:
+        print(f"Error in summary_tool: {e}")
+        return {"response": "An error occurred while generating the summary."}

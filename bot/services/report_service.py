@@ -43,7 +43,7 @@ def _summary_service(
         tasks_res = query.execute()
 
         if not tasks_res.data:
-            return (True, f"📊 No tasks found in the last {days} days for this project.")
+            return (True, f"📊 No tasks found in the last {days} days for {project_name}.")
 
         tasks = tasks_res.data
 

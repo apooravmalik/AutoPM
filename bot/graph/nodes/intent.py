@@ -26,6 +26,7 @@ The JSON object MUST have two keys: "action" and "params".
     - For 'project_details', 'project_files', 'get_files': `params` must include `project_name`. This is for when a user wants "details" or "information".
     - For 'answer_project_question': `params` must include `project_name` and `question`.
     - For all other actions, extract relevant entities as seen in the user's request.
+    - For 'summary': `params` can include `project_name` and `days`
 
 Your final output MUST ONLY be the valid JSON object. Do not add explanations or markdown.
 ---
@@ -84,6 +85,21 @@ Your JSON Output:
 User Request: "in the project 'New Website', what is the deadline for the design phase?"
 Your JSON Output:
 {{"action": "answer_project_question", "params": {{"project_name": "New Website", "question": "what is the deadline for the design phase"}}}}
+---
+**Example 12: Summary with project and days**
+User Request: "Can you give me the Summary for 'Test' Project for last 10 days?"
+Your JSON Output:
+{{"action": "summary", "params": {{"project_name": "Test", "days": 10}}}}
+---
+**Example 13: Summary with project, default days**
+User Request: "give me the summary for 'AutoPM'"
+Your JSON Output:
+{{"action": "summary", "params": {{"project_name": "AutoPM", "days": 7}}}}
+---
+**Example 14: Summary for all projects**
+User Request: "give me the summary for all projects"
+Your JSON Output:
+{{"action": "summary", "params": {{"project_name": null, "days": 7}}}}
 """
 
 
