@@ -25,12 +25,26 @@ from handlers.project_handler import (
 )
 from handlers.ai_handler import route_to_ai
 from handlers.report_handler import summary
+from flask import Flask
+from waitress import serve
+import threading
+import asyncio
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME")
 
 print(f"✅ Bot script started. Listening for mentions of: @{BOT_USERNAME}")
+
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def index():
+    return "Bot is running!"
+
+def run_flask():
+    port = int(os.environ.get('PORT', 8080))
+    serve(flask_app, host='0.0.0.0', port=port)
 
 # Create bot application
 app = Application.builder().token(BOT_TOKEN).build()
@@ -81,7 +95,13 @@ app.add_handler(CommandHandler("project_files", project_files))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document_upload))
 app.add_handler(CommandHandler("get_files", get_files))
 
-# Run bot
+# --- Main execution block ---
 if __name__ == "__main__":
-    import asyncio
+    # Start the Flask server in a separate thread
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+
+    # Start the Telegram bot's polling
+    print("Starting bot polling...")
     asyncio.run(app.run_polling())

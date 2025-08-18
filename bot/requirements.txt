@@ -13,3 +13,5 @@ python-docx
 sentence-transformers
 torch
 scikit-learn
+Flask
+waitress
