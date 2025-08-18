@@ -1,4 +1,8 @@
 import os
+import asyncio
+import threading
+from flask import Flask
+from waitress import serve
 from dotenv import load_dotenv
 from telegram import Update, ChatMemberUpdated
 from telegram.ext import Application, MessageHandler, CommandHandler, ChatMemberHandler, ContextTypes, filters
@@ -16,7 +20,7 @@ from handlers.task_handler import (
     task_details
 )
 from handlers.project_handler import (
-    delete_project, 
+    delete_project,
     create_project,
     project_details,
     project_files,
@@ -25,17 +29,15 @@ from handlers.project_handler import (
 )
 from handlers.ai_handler import route_to_ai
 from handlers.report_handler import summary
-from flask import Flask
-from waitress import serve
-import threading
-import asyncio
 
+# Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME")
 
 print(f"✅ Bot script started. Listening for mentions of: @{BOT_USERNAME}")
 
+# --- Create Flask App for Render Health Checks ---
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -44,13 +46,13 @@ def index():
 
 def run_flask():
     port = int(os.environ.get('PORT', 8080))
+    print(f"Starting Flask server on port {port}...")
     serve(flask_app, host='0.0.0.0', port=port)
 
-# Create bot application
+# --- Telegram Bot Setup ---
 app = Application.builder().token(BOT_TOKEN).build()
 
-# Handler to respond to greetings
-async def handle_hello(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_hello(update: Update, context: "ContextTypes.DEFAULT_TYPE"):
     message_text = update.message.text.lower()
     if message_text in ["hello", "hi", "hey"]:
         telegram_username = update.effective_user.username or "there"
@@ -58,23 +60,18 @@ async def handle_hello(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👋 Hello @{telegram_username}!\n\n"
             "Welcome to AutoPM Bot.\n\n"
             "➡️ First, login on the web app and go to Settings → Generate One-Time Code (OTC).\n"
-            "🔗 [Login here](http://localhost:5173/)\n\n"
+            "🔗 [Login here](http://localhost:5173/)\n\n" # You might want to change this URL later
             "Then use:\n"
             "`/link <Your OTC>` to connect your Telegram.",
             parse_mode="Markdown"
         )
-        
-# This handler will specifically catch any text message starting with your bot's @-mention.
-# We use re.IGNORECASE so "@autopm_bot" and "@AutoPM_bot" both work.
+
+# --- Register all your handlers ---
 ai_command_filter = filters.Regex(re.compile(r'^@' + re.escape(BOT_USERNAME), re.IGNORECASE))
 app.add_handler(MessageHandler(ai_command_filter, route_to_ai))
-
-# Register handlers
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_hello))
 app.add_handler(CommandHandler("link", link))
 app.add_handler(ChatMemberHandler(group_handler, ChatMemberHandler.MY_CHAT_MEMBER))
-
-# Register task handlers
 app.add_handler(CommandHandler("create_task", create_task))
 app.add_handler(CommandHandler("assign", assign_task))
 app.add_handler(CommandHandler("working", working_task))
@@ -83,11 +80,7 @@ app.add_handler(CommandHandler("tasks", list_tasks))
 app.add_handler(CommandHandler("history", task_history))
 app.add_handler(CommandHandler("delete_task", delete_task_by_id))
 app.add_handler(CommandHandler("task_details", task_details))
-
-# Register report handlers
 app.add_handler(CommandHandler("summary", summary))
-
-#Register project handlers
 app.add_handler(CommandHandler("create_project", create_project))
 app.add_handler(CommandHandler("delete_project", delete_project))
 app.add_handler(CommandHandler("project_details", project_details))
