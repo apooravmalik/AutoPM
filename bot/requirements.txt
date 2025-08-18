@@ -3,10 +3,10 @@ supabase
 datetime
 langgraph
 langchain
-openai==1.17.2
+openai==1.17.1
 langchain_openai
 jsonschema
-litellm==1.36.8
+litellm==1.37.0
 groq
 pypdf
 python-docx
