@@ -9,17 +9,21 @@ import litellm
 from utils.ai_client import get_model_name
 import json
 from sklearn.metrics.pairwise import cosine_similarity
+import gc
 
-embeddings_model = SentenceTransformer('all-MiniLM-L6-v2')
+# embeddings_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 def _embed_and_store_file_content(project_id: str, file_content: str) -> bool:
     """
-    Generates embeddings for file content using a local model and updates the project record.
+    Generates embeddings for file content. The model is loaded on-demand.
     """
+    embeddings_model = None
     try:
-        print(f"--- 🧠 Generating embeddings for project {project_id} using a local model ---")
+        from sentence_transformers import SentenceTransformer # Lazy import
+        print("--- 🧠 Loading embedding model for file upload... ---")
+        embeddings_model = SentenceTransformer('paraphrase-MiniLM-L3-v2')
 
-        # 1. Split the document into chunks
+        print(f"--- 🧠 Generating embeddings for project {project_id} ---")
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         chunks = text_splitter.split_text(file_content)
 
@@ -27,35 +31,27 @@ def _embed_and_store_file_content(project_id: str, file_content: str) -> bool:
             print(f"--- ⚠️ No text chunks to embed for project {project_id} ---")
             return False
 
-        # 2. Generate embeddings for the chunks using SentenceTransformer
         embeddings = embeddings_model.encode(chunks)
-
-        # 3. Create a list of dictionaries, where each dictionary contains a chunk and its embedding
-        chunk_data = []
-        for i, chunk in enumerate(chunks):
-            chunk_data.append({
-                "content": chunk,
-                "embedding": embeddings[i].tolist()
-            })
-
-        # 4. Serialize the list of dictionaries to a JSON string
+        chunk_data = [{"content": chunk, "embedding": embeddings[i].tolist()} for i, chunk in enumerate(chunks)]
         raw_input = json.dumps(chunk_data)
 
-        # 5. Update the project table with the new raw_input
-        response = supabase.from_("projects").update({
-            "raw_input": raw_input
-        }).eq("id", project_id).execute()
+        response = supabase.from_("projects").update({"raw_input": raw_input}).eq("id", project_id).execute()
 
         if response.data:
             print(f"--- ✅ Chunks and embeddings stored for project {project_id} ---")
             return True
         else:
-            print(f"--- ❌ Failed to store chunks and embeddings for project {project_id}. Response: {response.error} ---")
+            print(f"--- ❌ Failed to store chunks/embeddings. Response: {response.error} ---")
             return False
-
     except Exception as e:
         print(f"Error in _embed_and_store_file_content: {e}")
         return False
+    finally:
+        # Crucially, unload the model and clean up memory
+        if embeddings_model:
+            del embeddings_model
+            gc.collect()
+            print("--- 🧠 File embedding model unloaded and memory freed. ---")
 
 async def _answer_project_question_service(
     project_name: str,
