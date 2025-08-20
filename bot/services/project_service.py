@@ -8,10 +8,9 @@ import numpy as np
 import litellm
 from utils.ai_client import get_model_name
 import json
-from sklearn.metrics.pairwise import cosine_similarity
-import gc
+import gc # Import the garbage collector
 
-# embeddings_model = SentenceTransformer('all-MiniLM-L6-v2')
+# NOTE: All heavy libraries are now imported inside the functions that use them.
 
 def _embed_and_store_file_content(project_id: str, file_content: str) -> bool:
     """
@@ -19,7 +18,11 @@ def _embed_and_store_file_content(project_id: str, file_content: str) -> bool:
     """
     embeddings_model = None
     try:
-        from sentence_transformers import SentenceTransformer # Lazy import
+        # Lazy import of all heavy ML libraries
+        from sentence_transformers import SentenceTransformer
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        import numpy as np
+        
         print("--- 🧠 Loading embedding model for file upload... ---")
         embeddings_model = SentenceTransformer('paraphrase-MiniLM-L3-v2')
 
@@ -53,43 +56,36 @@ def _embed_and_store_file_content(project_id: str, file_content: str) -> bool:
             gc.collect()
             print("--- 🧠 File embedding model unloaded and memory freed. ---")
 
-async def _answer_project_question_service(
-    project_name: str,
-    question: str,
-    group_id: int
-) -> Tuple[bool, str]:
+async def _answer_project_question_service(project_name: str, question: str, group_id: int) -> Tuple[bool, str]:
     """
-    Answers a user's question about a project using RAG.
+    Answers a question using RAG. The model is loaded on-demand.
     """
+    embeddings_model = None
     try:
-        print(f"--- ❓ Answering question about project: {project_name} ---")
+        # Lazy import of all heavy ML libraries
+        from sentence_transformers import SentenceTransformer
+        from sklearn.metrics.pairwise import cosine_similarity
+        import numpy as np
 
-        # 1. Find the project to get its raw_input
+        print("--- 🧠 Loading embedding model for RAG... ---")
+        embeddings_model = SentenceTransformer('paraphrase-MiniLM-L3-v2')
+
         project_res = supabase.from_("projects").select("raw_input").eq("name", project_name).eq("group_id", group_id).single().execute()
 
         if not project_res.data or not project_res.data.get("raw_input"):
             return (False, f"Could not find the project '{project_name}' or it has no files attached.")
 
-        # 2. Deserialize the raw_input to get the chunks and embeddings
         chunk_data = json.loads(project_res.data["raw_input"])
-
-        # 3. Generate an embedding for the user's question
         question_embedding = embeddings_model.encode([question])
-
-        # 4. Calculate cosine similarity between the question and all chunks
         chunk_embeddings = np.array([chunk['embedding'] for chunk in chunk_data])
         similarities = cosine_similarity(question_embedding, chunk_embeddings)[0]
 
-        # 5. Get the top N most similar chunks
         top_n = 5
         top_indices = np.argsort(similarities)[-top_n:][::-1]
-
-        # 6. Construct the context for the LLM
         context = "Relevant information from project documents:\n"
         for i in top_indices:
             context += f"- {chunk_data[i]['content']}\n"
 
-        # 7. Call the LLM with the context and question
         response = await litellm.acompletion(
             model=get_model_name(),
             messages=[
@@ -97,13 +93,16 @@ async def _answer_project_question_service(
                 {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
             ]
         )
-
-        answer = response.choices[0].message.content
-        return (True, answer)
-
+        return (True, response.choices[0].message.content)
     except Exception as e:
         print(f"Error in _answer_project_question_service: {e}")
         return (False, "An error occurred while trying to answer your question.")
+    finally:
+        # Crucially, unload the model and clean up memory
+        if embeddings_model:
+            del embeddings_model
+            gc.collect()
+            print("--- 🧠 RAG embedding model unloaded and memory freed. ---")
 
 def _create_project_service(
     telegram_user_id: int,
